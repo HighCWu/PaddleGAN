@@ -30,32 +30,49 @@ class EqualConv2D(nn.Layer):
                  kernel_size,
                  stride=1,
                  padding=0,
-                 bias=True):
+                 bias=True,
+                 bias_init=0,
+                 lr_mul=1,
+                 activation=None):
         super().__init__()
 
         self.weight = self.create_parameter(
             (out_channel, in_channel, kernel_size, kernel_size),
             default_initializer=nn.initializer.Normal())
-        self.scale = 1 / math.sqrt(in_channel * (kernel_size * kernel_size))
-
+        self.weight.set_value((self.weight / lr_mul))
+        
         self.stride = stride
         self.padding = padding
 
         if bias:
             self.bias = self.create_parameter((out_channel, ),
-                                              nn.initializer.Constant(0.0))
+                                              nn.initializer.Constant(bias_init))
 
         else:
             self.bias = None
+            
+        self.activation = activation
+        
+        self.scale = 1 / math.sqrt(in_channel * (kernel_size * kernel_size)) * lr_mul
+        self.lr_mul = lr_mul
 
     def forward(self, input):
-        out = F.conv2d(
-            input,
-            self.weight * self.scale,
-            bias=self.bias,
-            stride=self.stride,
-            padding=self.padding,
-        )
+        if self.activation:
+            out = F.conv2d(
+                input,
+                self.weight * self.scale,
+                stride=self.stride,
+                padding=self.padding,
+            )
+            out = fused_leaky_relu(out, None if self.bias is None else self.bias * self.lr_mul)
+        else:
+            out = F.conv2d(
+                input,
+                self.weight * self.scale,
+                bias=None if self.bias is None else self.bias * self.lr_mul,
+                stride=self.stride,
+                padding=self.padding,
+            )
 
         return out
 
@@ -98,12 +115,12 @@ class EqualLinear(nn.Layer):
     def forward(self, input):
         if self.activation:
             out = F.linear(input, self.weight * self.scale)
-            out = fused_leaky_relu(out, self.bias * self.lr_mul)
+            out = fused_leaky_relu(out, None if self.bias is None else self.bias * self.lr_mul)
 
         else:
             out = F.linear(input,
                            self.weight * self.scale,
-                           bias=self.bias * self.lr_mul)
+                           bias=None if self.bias is None else self.bias * self.lr_mul)
 
         return out
 

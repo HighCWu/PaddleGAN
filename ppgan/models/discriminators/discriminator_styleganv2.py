@@ -108,7 +108,7 @@ def var(x, axis=None, unbiased=True, keepdim=False, name=None):
 
 @DISCRIMINATORS.register()
 class StyleGANv2Discriminator(nn.Layer):
-    def __init__(self, size, channel_multiplier=2, blur_kernel=[1, 3, 3, 1]):
+    def __init__(self, size, channel_multiplier=2, blur_kernel=[1, 3, 3, 1], lr_mul=0.01, use_condition=False, condition_dim=512, condition_n_mlp=2):
         super().__init__()
 
         channels = {
@@ -137,6 +137,17 @@ class StyleGANv2Discriminator(nn.Layer):
             in_channel = out_channel
 
         self.convs = nn.Sequential(*convs)
+        self.cond_convs = None if not use_condition else (
+            nn.Sequential(
+                *list(
+                    [] if condition_n_mlp == 0 else [
+                    EqualConv2D(condition_dim, channels[4], 1, lr_mul=lr_mul, activation="fused_lrelu")
+                    ] + [
+                    EqualConv2D(channels[4], channels[4], 1, lr_mul=lr_mul, activation="fused_lrelu") for _ in range(condition_n_mlp - 1)
+                    ]
+                )
+            )
+        )
 
         self.stddev_group = 4
         self.stddev_feat = 1
@@ -149,8 +160,10 @@ class StyleGANv2Discriminator(nn.Layer):
             EqualLinear(channels[4], 1),
         )
 
-    def forward(self, input):
+    def forward(self, input, condition=None):
         out = self.convs(input)
+        if self.cond_convs is not None and condition is not None:
+            out = out + self.cond_convs(condition)
 
         batch, channel, height, width = out.shape
         group = min(batch, self.stddev_group)

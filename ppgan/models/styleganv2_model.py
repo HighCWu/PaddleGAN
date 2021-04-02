@@ -181,6 +181,7 @@ class StyleGAN2Model(BaseModel):
 
         """
         self.real_img = paddle.to_tensor(input['A'])
+        self.condition = paddle.to_tensor(input['condition']) if 'condition' in input else None
 
     def forward(self):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
@@ -209,12 +210,12 @@ class StyleGAN2Model(BaseModel):
         batch = self.real_img.shape[0]
         noise = self.mixing_noise(batch, self.mixing_prob)
 
-        fake_img, _ = self.nets['gen'](noise)
+        fake_img, _ = self.nets['gen'](noise, dynamic_input=self.condition)
         self.visual_items['real_img'] = self.real_img
         self.visual_items['fake_img'] = fake_img
-        fake_pred = self.nets['disc'](fake_img.detach())
+        fake_pred = self.nets['disc'](fake_img.detach(), condition=self.condition)
 
-        real_pred = self.nets['disc'](self.real_img)
+        real_pred = self.nets['disc'](self.real_img, condition=self.condition)
         # wgan loss with softplus (logistic loss) for discriminator
         l_d_total = 0.
         l_d = self.gan_criterion(real_pred, True,
@@ -230,7 +231,7 @@ class StyleGAN2Model(BaseModel):
 
         if current_iter % self.disc_iters == 0:
             self.real_img.stop_gradient = False
-            real_pred = self.nets['disc'](self.real_img)
+            real_pred = self.nets['disc'](self.real_img, condition=self.condition)
             l_d_r1 = r1_penalty(real_pred, self.real_img)
             l_d_r1 = (self.r1_reg_weight / 2 * l_d_r1 * self.disc_iters +
                       0 * real_pred[0])
@@ -246,8 +247,8 @@ class StyleGAN2Model(BaseModel):
         optimizers['optimG'].clear_grad()
 
         noise = self.mixing_noise(batch, self.mixing_prob)
-        fake_img, _ = self.nets['gen'](noise)
-        fake_pred = self.nets['disc'](fake_img)
+        fake_img, _ = self.nets['gen'](noise, dynamic_input=self.condition)
+        fake_pred = self.nets['disc'](fake_img, condition=self.condition)
 
         # wgan loss with softplus (non-saturating loss) for generator
         l_g_total = 0.
@@ -258,7 +259,7 @@ class StyleGAN2Model(BaseModel):
         if current_iter % self.gen_iters == 0:
             path_batch_size = max(1, batch // self.path_batch_shrink)
             noise = self.mixing_noise(path_batch_size, self.mixing_prob)
-            fake_img, latents = self.nets['gen'](noise, return_latents=True)
+            fake_img, latents = self.nets['gen'](noise, return_latents=True, dynamic_input=self.condition[:path_batch_size])
             l_g_path, path_lengths, self.mean_path_length = g_path_regularize(
                 fake_img, latents, self.mean_path_length)
 
@@ -276,7 +277,7 @@ class StyleGAN2Model(BaseModel):
 
         if self.current_iter % self.visual_iters:
             sample_z = [self.make_noise(1, 1)]
-            sample, _ = self.nets['gen_ema'](sample_z)
+            sample, _ = self.nets['gen_ema'](sample_z, dynamic_input=self.condition[:1])
             self.visual_items['fake_img_ema'] = sample
 
         self.current_iter += 1

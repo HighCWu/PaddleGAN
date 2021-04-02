@@ -19,7 +19,7 @@ import paddle.nn as nn
 import paddle.nn.functional as F
 
 from .builder import GENERATORS
-from ...modules.equalized import EqualLinear
+from ...modules.equalized import EqualLinear, EqualConv2D
 from ...modules.fused_act import FusedLeakyReLU
 from ...modules.upfirdn2d import Upfirdn2dUpsample, Upfirdn2dBlur
 
@@ -240,6 +240,9 @@ class StyleGANv2Generator(nn.Layer):
         channel_multiplier=2,
         blur_kernel=[1, 3, 3, 1],
         lr_mlp=0.01,
+        dynamic_input=False,
+        dynamic_input_dim=512,
+        dynamic_input_n_mlp=2
     ):
         super().__init__()
 
@@ -270,7 +273,19 @@ class StyleGANv2Generator(nn.Layer):
             1024: 16 * channel_multiplier,
         }
 
-        self.input = ConstantInput(self.channels[4])
+        self.input = ConstantInput(
+            self.channels[4]
+        ) if not dynamic_input else (
+            nn.Sequential(
+                *list(
+                    [] if dynamic_input_n_mlp == 0 else [
+                        EqualConv2D(dynamic_input_dim, self.channels[4], 1, lr_mul=lr_mlp, activation="fused_lrelu")
+                    ] + [
+                        EqualConv2D(self.channels[4], self.channels[4], 1, lr_mul=lr_mlp, activation="fused_lrelu") for _ in range(dynamic_input_n_mlp - 1)
+                    ]
+                )
+            )
+        )
         self.conv1 = StyledConv(self.channels[4],
                                 self.channels[4],
                                 3,
@@ -348,6 +363,7 @@ class StyleGANv2Generator(nn.Layer):
         input_is_latent=False,
         noise=None,
         randomize_noise=True,
+        dynamic_input=None
     ):
         if not input_is_latent:
             styles = [self.style(s) for s in styles]
@@ -389,7 +405,7 @@ class StyleGANv2Generator(nn.Layer):
 
             latent = paddle.concat([latent, latent2], 1)
 
-        out = self.input(latent)
+        out = self.input(latent if dynamic_input is None else dynamic_input)
         out = self.conv1(out, latent[:, 0], noise=noise[0])
 
         skip = self.to_rgb1(out, latent[:, 1])

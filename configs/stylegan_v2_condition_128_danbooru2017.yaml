@@ -1,0 +1,63 @@
+total_iters: 800000
+output_dir: output_dir
+
+model:
+  name: StyleGAN2Model
+  generator:
+    name: StyleGANv2Generator
+    size: 128
+    style_dim: 512
+    n_mlp: 8
+    dynamic_input: true
+  discriminator:
+    name: StyleGANv2Discriminator
+    size: 128
+    use_condition: true
+  gan_criterion:
+    name: GANLoss
+    gan_mode: logistic
+    loss_weight: !!float 1
+  # r1 regularization for discriminator
+  r1_reg_weight: 10.
+  # path length regularization for generator
+  path_batch_shrink: 2.
+  path_reg_weight: 2.
+  params:
+    gen_iters: 4
+    disc_iters: 16
+
+dataset:
+  train:
+    name: StyleGANv2ConditionDataset
+    target_path: data/anime
+    condition_paths: [data/anime-sketch-npy, data/anime-sketch-noise-npy]
+    num_workers: 3
+    batch_size: 3
+
+lr_scheduler:
+  name: MultiStepDecay
+  learning_rate: 0.002
+  milestones: [600000]
+  gamma: 0.5
+
+optimizer:
+  optimG:
+    name: Adam
+    beta1: 0.0
+    beta2: 0.792
+    net_names:
+      - gen
+  optimD:
+    name: Adam
+    net_names:
+      - disc
+    beta1: 0.0
+    beta2: 0.9317647058823529
+
+
+log_config:
+  interval: 50
+  visiual_interval: 500
+
+snapshot_config:
+  interval: 5000
